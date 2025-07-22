@@ -1,6 +1,6 @@
-import logging
 import os
 import sys
+from datetime import datetime
 
 import torch
 import torch.nn.functional as F
@@ -20,8 +20,26 @@ class SimCLR(object):
         self.optimizer = kwargs['optimizer']
         self.scheduler = kwargs['scheduler']
         self.writer = SummaryWriter()
-        logging.basicConfig(filename=os.path.join(self.writer.log_dir, 'training.log'), level=logging.DEBUG)
+        
+        # Create results txt file
+        self.results_file = os.path.join(self.writer.log_dir, 'training_results.txt')
+        with open(self.results_file, 'w', encoding='utf-8') as f:
+            f.write(f"SimCLR Training Results - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("="*50 + "\n\n")
+        
         self.criterion = torch.nn.CrossEntropyLoss().to(self.args.device)
+
+    def log_and_print(self, message, level="INFO"):
+        """Print to console and save to txt file"""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        formatted_message = f"[{timestamp}] {level}: {message}"
+        
+        # Print to console
+        print(formatted_message)
+        
+        # Save to txt file
+        with open(self.results_file, 'a', encoding='utf-8') as f:
+            f.write(formatted_message + "\n")
 
     def info_nce_loss(self, features):
 
@@ -62,8 +80,8 @@ class SimCLR(object):
         save_config_file(self.writer.log_dir, self.args)
 
         n_iter = 0
-        logging.info(f"Start SimCLR training for {self.args.epochs} epochs.")
-        logging.info(f"Training with gpu: {self.args.disable_cuda}.")
+        self.log_and_print(f"Start SimCLR training for {self.args.epochs} epochs.")
+        self.log_and_print(f"Training with gpu: {not self.args.disable_cuda}.")
 
         for epoch_counter in range(self.args.epochs):
             for images, _ in tqdm(train_loader):
@@ -89,15 +107,18 @@ class SimCLR(object):
                     self.writer.add_scalar('acc/top1', top1[0], global_step=n_iter)
                     self.writer.add_scalar('acc/top5', top5[0], global_step=n_iter)
                     self.writer.add_scalar('learning_rate', self.scheduler.get_lr()[0], global_step=n_iter)
+                    
+                    # Print and save training metrics
+                    self.log_and_print(f"Step {n_iter}: Loss={loss:.4f}, Top1 Acc={top1[0]:.2f}%, Top5 Acc={top5[0]:.2f}%, LR={self.scheduler.get_lr()[0]:.6f}")
 
                 n_iter += 1
 
             # warmup for the first 10 epochs
             if epoch_counter >= 10:
                 self.scheduler.step()
-            logging.debug(f"Epoch: {epoch_counter}\tLoss: {loss}\tTop1 accuracy: {top1[0]}")
+            self.log_and_print(f"Epoch: {epoch_counter}\tLoss: {loss:.4f}\tTop1 accuracy: {top1[0]:.2f}%", "DEBUG")
 
-        logging.info("Training has finished.")
+        self.log_and_print("Training has finished.")
         # save model checkpoints
         checkpoint_name = 'checkpoint_{:04d}.pth.tar'.format(self.args.epochs)
         save_checkpoint({
@@ -106,4 +127,4 @@ class SimCLR(object):
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
         }, is_best=False, filename=os.path.join(self.writer.log_dir, checkpoint_name))
-        logging.info(f"Model checkpoint and metadata has been saved at {self.writer.log_dir}.")
+        self.log_and_print(f"Model checkpoint and metadata has been saved at {self.writer.log_dir}.")
